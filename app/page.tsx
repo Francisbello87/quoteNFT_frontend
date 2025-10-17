@@ -1,103 +1,202 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useEffect, useState } from "react";
+import { useChat } from "@ai-sdk/react";
+import { DefaultChatTransport, UIMessage } from "ai";
+import { useAccount, useWriteContract } from "wagmi";
+import { QUOTE_NFT_ABI, QUOTE_NFT_ADDRESS } from "@/lib/contract";
+import { Address } from "viem";
+import { toast } from "sonner";
+
+export default function Page() {
+  const [input, setInput] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [mintingId, setMintingId] = useState<string | null>(null);
+
+  const { address, isConnected } = useAccount();
+  const { writeContractAsync } = useWriteContract();
+
+  const { messages, setMessages, sendMessage } = useChat({
+    transport: new DefaultChatTransport({ api: "/api/chat" }),
+  });
+
+
+  useEffect(() => {
+    const saved = localStorage.getItem("ai-quotes-chat");
+    if (saved) {
+      try {
+        setMessages(JSON.parse(saved));
+      } catch (err) {
+        console.error("Error loading saved chat:", err);
+      }
+    }
+  }, [setMessages]);
+
+
+  useEffect(() => {
+    if (messages.length > 0) {
+      localStorage.setItem("ai-quotes-chat", JSON.stringify(messages));
+    }
+  }, [messages]);
+
+
+  useEffect(() => {
+    const hasAIMessage = messages.some((m) => m.role === "assistant");
+    if (hasAIMessage) setIsLoading(false);
+  }, [messages]);
+
+
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!input.trim()) return;
+    setIsLoading(true);
+    sendMessage({
+      text: input,
+      metadata: { walletAddress: address || "guest" },
+    });
+    setInput("");
+  };
+
+  const handleMint = async (quoteId: string, quoteText: string) => {
+    if (!address) return toast.error("Please connect your wallet first.");
+    setMintingId(quoteId); 
+    const mintToast = toast.loading("Minting your quote NFT...");
+
+    try {
+      const imageRes = await fetch("/api/generate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ quote: quoteText }),
+      });
+
+      if (!imageRes.ok) throw new Error(await imageRes.text());
+      const { imageUri } = await imageRes.json();
+      if (!imageUri) throw new Error("No image URI returned");
+
+      const metadata = {
+        name: "AI Quote NFT",
+        description: quoteText,
+        image: imageUri,
+      };
+
+      const metadataRes = await fetch("/api/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(metadata),
+      });
+
+      if (!metadataRes.ok) throw new Error(await metadataRes.text());
+      const { ipfsUri: metadataUri } = await metadataRes.json();
+
+      await writeContractAsync({
+        address: QUOTE_NFT_ADDRESS as Address,
+        abi: QUOTE_NFT_ABI,
+        functionName: "mintQuote",
+        args: [address as Address, metadataUri],
+        gas: BigInt(250000),
+      });
+
+      toast.success("✅ Quote minted successfully!", { id: mintToast });
+    } catch (err) {
+      console.error("Minting error:", err);
+      toast.error(
+        err instanceof Error ? `❌ ${err.message}` : "❌ Mint failed",
+        {
+          id: mintToast,
+        }
+      );
+    } finally {
+      setMintingId(null);
+    }
+  };
+
   return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+    <main className="flex flex-col items-center justify-between min-h-screen w-full p-6">
+      <h1 className="text-2xl font-bold mb-4">AI Quote Generator</h1>
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+      <div className="flex-1 w-full max-w-2xl overflow-y-auto space-y-3 mb-24">
+        {messages.map((m: UIMessage) => {
+          const textParts = m.parts.filter((p) => p.type === "text") as {
+            type: "text";
+            text: string;
+          }[];
+          const fullText = textParts.map((p) => p.text).join(" ");
+          const isAI = m.role === "assistant";
+
+          return (
+            <div
+              key={m.id}
+              className={`flex w-full ${
+                isAI ? "justify-start" : "justify-end"
+              }`}
+            >
+              <div
+                className={`max-w-[80%] p-3 rounded-2xl shadow-sm ${
+                  isAI
+                    ? "bg-gray-100/85 text-gray-900 rounded-tl-none"
+                    : "bg-white/65 text-gray-800 rounded-tr-none"
+                }`}
+              >
+                <p className="text-sm leading-relaxed">{fullText}</p>
+
+                {isAI && isConnected && (
+                  <div className="flex justify-end mt-2">
+                    <button
+                      onClick={() => handleMint(m.id, fullText)}
+                      disabled={mintingId === m.id}
+                      className={`px-3 py-1 text-xs font-semibold cursor-pointer text-white rounded-lg
+                      transition-all duration-200 ease-in-out 
+                      bg-gradient-to-r from-indigo-500 via-purple-600 to-pink-500
+                      hover:from-indigo-600 hover:via-purple-700 hover:to-pink-600
+                      active:scale-95 
+                      shadow-md hover:shadow-lg
+                      disabled:opacity-50 disabled:cursor-not-allowed`}
+                    >
+                      {mintingId === m.id ? "Minting..." : "Mint as NFT"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+
+        {isLoading && (
+          <div className="flex justify-start">
+            <div className="flex items-center space-x-2 bg-gray-100 rounded-2xl px-4 py-2">
+              <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:-0.3s]" />
+              <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:-0.15s]" />
+              <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
+            </div>
+          </div>
+        )}
+      </div>
+
+      <form
+        onSubmit={handleSubmit}
+        className="fixed bottom-0 left-0 right-0 bg-background border-t border-border p-4 flex justify-center"
+      >
+        <div className="w-full max-w-2xl flex gap-2">
+          <input
+            className="flex-1 p-2 border border-border rounded-lg"
+            placeholder="Enter a theme e.g. courage"
+            value={input}
+            onChange={(e) => setInput(e.currentTarget.value)}
+          />
+          <button
+            type="submit"
+            className={`px-3 py-1 text-xs font-semibold text-white rounded-lg
+              transition-all duration-200 ease-in-out 
+              bg-gradient-to-r from-indigo-500 via-purple-600 to-pink-500
+              hover:from-indigo-600 hover:via-purple-700 hover:to-pink-600
+              active:scale-95 
+              shadow-md hover:shadow-lg
+              disabled:opacity-50 disabled:cursor-not-allowed`}
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+            Generate
+          </button>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+      </form>
+    </main>
   );
 }
