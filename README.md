@@ -1,7 +1,6 @@
 # 🖼 QuoteNFT Frontend
 
 [![License: MIT](https://img.shields.io/github/license/Francisbello87/quoteNFT_frontend?color=blue)](LICENSE)  
-[![Build Status](https://img.shields.io/github/actions/workflow/status/Francisbello87/quoteNFT_frontend/test.yml?branch=main&label=Tests)](https://github.com/Francisbello87/quoteNFT_frontend/actions/workflows/test.yml)  
 [![Last Commit](https://img.shields.io/github/last-commit/Francisbello87/quoteNFT_frontend?color=brightgreen)](https://github.com/Francisbello87/quoteNFT_frontend/commits/main)  
 [![Stars](https://img.shields.io/github/stars/Francisbello87/quoteNFT_frontend?style=social)](https://github.com/Francisbello87/quoteNFT_frontend/stargazers)  
 [![Forks](https://img.shields.io/github/forks/Francisbello87/quoteNFT_frontend?style=social)](https://github.com/Francisbello87/quoteNFT_frontend/network/members)
