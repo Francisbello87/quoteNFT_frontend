@@ -8,7 +8,7 @@ import { http } from "wagmi";
 import { Toaster } from "sonner";
 const config = getDefaultConfig({
   appName: "AI Quote Generator",
-  projectId: "8a676e9208392a59542a541bd97c9298",
+  projectId: process.env.NEXT_PUBLIC_APP_ID!,
   chains: [sepolia],
   transports: {
     [sepolia.id]: http(
